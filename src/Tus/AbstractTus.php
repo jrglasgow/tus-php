@@ -41,6 +41,10 @@ abstract class AbstractTus
      */
     private mixed $logger;
 
+    public function __construct($cacheAdapter = 'file', $logger = NULL) {
+      $this->logger = $logger;
+    }
+
     /**
      * Set cache.
      *
@@ -53,7 +57,7 @@ abstract class AbstractTus
     public function setCache($cache) : self
     {
         if (\is_string($cache)) {
-            $this->cache = CacheFactory::make($cache, $this->logger);
+            $this->cache = CacheFactory::make($cache);
         } elseif ($cache instanceof Cacheable) {
             $this->cache = $cache;
         }

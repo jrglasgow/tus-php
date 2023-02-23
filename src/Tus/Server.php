@@ -83,12 +83,12 @@ class Server extends AbstractTus
      */
     public function __construct($cacheAdapter = 'file', $logger = NULL)
     {
+      parent::__construct($cacheAdapter, $logger);
         $this->request    = new Request;
         $this->response   = new Response;
         $this->middleware = new Middleware;
         $this->uploadDir  = \dirname(__DIR__, 2) . '/' . 'uploads';
 
-        $this->logger = $logger;
         $this->setCache($cacheAdapter);
     }
 
