@@ -83,7 +83,7 @@ class Server extends AbstractTus
      */
     public function __construct($cacheAdapter = 'file', $logger = NULL)
     {
-      parent::__construct($cacheAdapter, $logger);
+        parent::__construct($cacheAdapter, $logger);
         $this->request    = new Request;
         $this->response   = new Response;
         $this->middleware = new Middleware;

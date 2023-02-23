@@ -39,7 +39,7 @@ abstract class AbstractTus
     /**
      * @var \Psr\Log\LoggerInterface|null
      */
-    private mixed $logger;
+    protected mixed $logger;
 
     public function __construct($cacheAdapter = 'file', $logger = NULL) {
       $this->logger = $logger;
