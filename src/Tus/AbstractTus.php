@@ -37,6 +37,11 @@ abstract class AbstractTus
     protected $dispatcher;
 
     /**
+     * @var \Psr\Log\LoggerInterface|null
+     */
+    private mixed $logger;
+
+    /**
      * Set cache.
      *
      * @param mixed $cache
@@ -48,7 +53,7 @@ abstract class AbstractTus
     public function setCache($cache) : self
     {
         if (\is_string($cache)) {
-            $this->cache = CacheFactory::make($cache);
+            $this->cache = CacheFactory::make($cache, $this->logger);
         } elseif ($cache instanceof Cacheable) {
             $this->cache = $cache;
         }

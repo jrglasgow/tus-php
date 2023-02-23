@@ -2,6 +2,7 @@
 
 namespace TusPhp\Tus;
 
+use Psr\Log\LoggerInterface;
 use TusPhp\File;
 use Carbon\Carbon;
 use TusPhp\Request;
@@ -73,20 +74,21 @@ class Server extends AbstractTus
      */
     protected $maxUploadSize = 0;
 
-    /**
+  /**
      * TusServer constructor.
      *
      * @param Cacheable|string $cacheAdapter
      *
      * @throws \ReflectionException
      */
-    public function __construct($cacheAdapter = 'file')
+    public function __construct($cacheAdapter = 'file', $logger = NULL)
     {
         $this->request    = new Request;
         $this->response   = new Response;
         $this->middleware = new Middleware;
         $this->uploadDir  = \dirname(__DIR__, 2) . '/' . 'uploads';
 
+        $this->logger = $logger;
         $this->setCache($cacheAdapter);
     }
 
@@ -192,6 +194,7 @@ class Server extends AbstractTus
         $key = $this->getRequest()->header('Upload-Key') ?? Uuid::uuid4()->toString();
 
         if (empty($key)) {
+            $this->log('error', 'Bad Request - empty key => :key', [':key' => $key]);
             return $this->response->send(null, HttpResponse::HTTP_BAD_REQUEST);
         }
 
@@ -260,12 +263,19 @@ class Server extends AbstractTus
         $requestMethod = $this->getRequest()->method();
 
         if ( ! \in_array($requestMethod, $this->getRequest()->allowedHttpVerbs(), true)) {
+            $this->log('error', 'HTTP method ":requestMethod" not allowed', [':requestMethod' => $requestMethod]);
             return $this->response->send(null, HttpResponse::HTTP_METHOD_NOT_ALLOWED);
         }
 
         $clientVersion = $this->getRequest()->header('Tus-Resumable');
 
         if (HttpRequest::METHOD_OPTIONS !== $requestMethod && $clientVersion && self::TUS_PROTOCOL_VERSION !== $clientVersion) {
+            $this->log('error', 'HTTP Precondition Failed: request method (:requestMethod) is not OPTIONS and client version (:clientVersion) in incompatible with this server protocol version (:TUS_PROTOCOL_VERSION)', [
+              ':method_options' => HttpRequest::METHOD_OPTIONS,
+              ':requestMethod' => $requestMethod,
+              ':clientVersion' => $clientVersion,
+              ':TUS_PROTOCOL_VERSION' => self::TUS_PROTOCOL_VERSION,
+            ]);
             return $this->response->send(null, HttpResponse::HTTP_PRECONDITION_FAILED, [
                 'Tus-Version' => self::TUS_PROTOCOL_VERSION,
             ]);
@@ -323,12 +333,16 @@ class Server extends AbstractTus
         $key = $this->request->key();
 
         if ( ! $fileMeta = $this->cache->get($key)) {
+            $this->log('error', 'Not fould, empty file metadata => <pre>:file_meta</pre>', [
+              ':file_meta' => print_r($fileMeta, TRUE)
+            ]);
             return $this->response->send(null, HttpResponse::HTTP_NOT_FOUND);
         }
 
         $offset = $fileMeta['offset'] ?? false;
 
         if (false === $offset) {
+            $this->log('error', 'File offset is empty.');
             return $this->response->send(null, HttpResponse::HTTP_GONE);
         }
 
@@ -346,6 +360,7 @@ class Server extends AbstractTus
         $uploadType = self::UPLOAD_TYPE_NORMAL;
 
         if (empty($fileName)) {
+            $this->log('error', 'Empty filename');
             return $this->response->send(null, HttpResponse::HTTP_BAD_REQUEST);
         }
 
@@ -453,6 +468,9 @@ class Server extends AbstractTus
         $uploadKey = $this->request->key();
 
         if ( ! $meta = $this->cache->get($uploadKey)) {
+            $this->log('error', 'Upload Key (:uploadKey) is not found in cache.', [
+              ':uploadKey' => $uploadKey,
+            ]);
             return $this->response->send(null, HttpResponse::HTTP_GONE);
         }
 
@@ -486,10 +504,13 @@ class Server extends AbstractTus
                 );
             }
         } catch (FileException $e) {
+            $this->logException($e);
             return $this->response->send($e->getMessage(), HttpResponse::HTTP_UNPROCESSABLE_ENTITY);
         } catch (OutOfRangeException $e) {
+            $this->logException($e);
             return $this->response->send(null, HttpResponse::HTTP_REQUESTED_RANGE_NOT_SATISFIABLE);
         } catch (ConnectionException $e) {
+            $this->logException($e);
             return $this->response->send(null, HttpResponse::HTTP_CONTINUE);
         }
 
@@ -510,18 +531,29 @@ class Server extends AbstractTus
     protected function verifyPatchRequest(array $meta) : int
     {
         if (self::UPLOAD_TYPE_FINAL === $meta['upload_type']) {
+            $this->log('error', 'Forbidden, upload type is not allowed. Metadata => <pre>:meta</pre>', [
+                ':meta' => print_r($meta, TRUE)
+            ]);
             return HttpResponse::HTTP_FORBIDDEN;
         }
 
         $uploadOffset = $this->request->header('upload-offset');
 
         if ($uploadOffset && $uploadOffset !== (string) $meta['offset']) {
+            $this->log('error', 'The upload offset (:uploadOffset) is conflicts with the previous upload offset: <pre>:meta</pre>', [
+              ':meta' => print_r($meta, TRUE)
+            ]);
             return HttpResponse::HTTP_CONFLICT;
         }
 
         $contentType = $this->request->header('Content-Type');
 
         if ($contentType !== self::HEADER_CONTENT_TYPE) {
+            $this->log('error', 'Request Content-Type (:content-type) is incompatible with required content type (:HEADER_CONTENT_TYPE)', [
+              ':content-type' => $contentType,
+              ':HEADER_CONTENT_TYPE' => self::HEADER_CONTENT_TYPE,
+              ':meta' => print_r($meta, TRUE)
+            ]);
             return HTTPRESPONSE::HTTP_UNSUPPORTED_MEDIA_TYPE;
         }
 
@@ -558,6 +590,9 @@ class Server extends AbstractTus
         $key  = end($path);
 
         if ( ! $fileMeta = $this->cache->get($key)) {
+            $this->log('error', 'The file metadata cannot be found based on the key provided (:key).', [
+              ':key' => $key,
+            ]);
             return $this->response->send('404 upload not found.', HttpResponse::HTTP_NOT_FOUND);
         }
 
@@ -565,6 +600,10 @@ class Server extends AbstractTus
         $fileName = $fileMeta['name'] ?? null;
 
         if ( ! $resource || ! file_exists($resource)) {
+            $this->log('error', 'The file (:file_path) cannot be found. <pre>:meta</pre>', [
+              ':file_path' => $fileMeta['file_path'],
+              ':meta' => print_r($fileMeta, TRUE),
+            ]);
             return $this->response->send('404 upload not found.', HttpResponse::HTTP_NOT_FOUND);
         }
 
@@ -583,12 +622,23 @@ class Server extends AbstractTus
         $resource = $fileMeta['file_path'] ?? null;
 
         if ( ! $resource) {
+            $this->log('error', 'The file (with key :key) cannot be deleted as it cannot be found. The resulting resource (:resource) does not exist <pre>:meta</pre>', [
+              ':key' => $key,
+              ':meta' => print_r($fileMeta, TRUE),
+              ':resource' => $resource,
+            ]);
             return $this->response->send(null, HttpResponse::HTTP_NOT_FOUND);
         }
 
         $isDeleted = $this->cache->delete($key);
 
         if ( ! $isDeleted || ! file_exists($resource)) {
+            $this->log('error', 'The file ( with key :key) cannot be deleted as either it cannot be found in the cache (:isDeleted) or the file (:resource) does not exist. <pre>:meta</pre>', [
+              ':isDeleted' => $isDeleted,
+              ':resource' => $resource,
+              ':key' => $key,
+              ':meta' => print_r($fileMeta, TRUE),
+            ]);
             return $this->response->send(null, HttpResponse::HTTP_GONE);
         }
 
@@ -682,6 +732,12 @@ class Server extends AbstractTus
         $checksum = base64_decode($checksum);
 
         if (false === $checksum || ! \in_array($checksumAlgorithm, hash_algos(), true)) {
+            $this->log('error', 'Checksum (:checksum) is FALSE or checksumAlgorithm (:checksumAlgorithm) is not in list of available hash_algos() :hash_algos.', [
+              ';checksum' => $checksum,
+              ':checksumAlgorithm' => $checksumAlgorithm,
+              ':hash_algos' => print_r(hash_algos(), TRUE),
+
+            ]);
             return $this->response->send(null, HttpResponse::HTTP_BAD_REQUEST);
         }
 
@@ -787,6 +843,10 @@ class Server extends AbstractTus
         $maxUploadSize = $this->getMaxUploadSize();
 
         if ($maxUploadSize > 0 && $this->getRequest()->header('Upload-Length') > $maxUploadSize) {
+            $this->log('error', 'Upload file size (:upload_length) is larger than max upload size (:max_length).', [
+                ':max_length' => $maxUploadSize,
+                ':upload_length' => $this->getRequest()->header('Upload-Length')
+            ]);
             return false;
         }
 
@@ -821,6 +881,63 @@ class Server extends AbstractTus
      */
     public function __call(string $method, array $params)
     {
+        $this->log('error', 'Bad Request, the method :method is not allowed.', [':method' => $method]);
         return $this->response->send(null, HttpResponse::HTTP_BAD_REQUEST);
+    }
+
+  /**
+   * Log a message to the logger provided
+   *
+   * @param $type
+   * @param $message
+   * @param $context
+   *
+   * @return void
+   */
+    protected function log($type, $message, $context = []) {
+      if (is_object($this->logger) && $this->logger instanceof LoggerInterface && method_exists($this->logger, $type)) {
+        $this->logger->{$type}($message, $context);
+      }
+    }
+
+    protected function logException(\Exception $exception, $message = NULL, $variables = [], $severity = 'error') {
+      // Use a default value if $message is not set.
+      if (empty($message)) {
+        $message = '%type: @message.';
+      }
+
+      $variables += self::decodeException($exception);
+      $this->log($severity, $message, $variables);
+    }
+
+    public static function decodeException(\Exception $exception) {
+        $message = $exception
+          ->getMessage();
+        $backtrace = $exception
+          ->getTrace();
+
+        // Add the line throwing the exception to the backtrace.
+        array_unshift($backtrace, [
+          'line' => $exception
+            ->getLine(),
+          'file' => $exception
+            ->getFile(),
+        ]);
+
+        //$caller = static::getLastCaller($backtrace);
+
+        return [
+          '%type' => get_class($exception),
+          // The standard PHP exception handler considers that the exception message
+          // is plain-text. We mimic this behavior here.
+          '@message' => $message,
+          //'%function' => $caller['function'],
+          //'%file' => $caller['file'],
+          //'%line' => $caller['line'],
+          'severity_level' => 'error',
+          'backtrace' => $backtrace,
+          '@backtrace_string' => $exception->getTraceAsString(),
+          'exception' => $exception,
+        ];
     }
 }
