@@ -84,6 +84,7 @@ class Server extends AbstractTus
     public function __construct($cacheAdapter = 'file', $logger = NULL)
     {
         parent::__construct($cacheAdapter, $logger);
+        $this->log('debug', 'logger is connected');
         $this->request    = new Request;
         $this->response   = new Response;
         $this->middleware = new Middleware;
