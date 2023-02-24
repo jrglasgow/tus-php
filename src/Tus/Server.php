@@ -512,6 +512,8 @@ class Server extends AbstractTus
         } catch (ConnectionException $e) {
             $this->logException($e);
             return $this->response->send(null, HttpResponse::HTTP_CONTINUE);
+        } catch (\Exception $e) {
+            $this->logException($e);
         }
 
         return $this->response->send(null, HttpResponse::HTTP_NO_CONTENT, [

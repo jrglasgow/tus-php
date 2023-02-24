@@ -383,7 +383,7 @@ class File
         }
 
         if (self::READ_BINARY === $mode && ! file_exists($filePath)) {
-            throw new FileException('File not found.');
+            throw new FileException('File not found. (' . $filePath . ')');
         }
 
         return true;
@@ -476,7 +476,7 @@ class File
 
         foreach ($files as $file) {
             if ( ! file_exists($file['file_path'])) {
-                throw new FileException('File to be merged not found.');
+                throw new FileException('File to be merged not found. (' . $file['file_path'] . ')');
             }
 
             $this->fileSize += $this->write($handle, file_get_contents($file['file_path']));
